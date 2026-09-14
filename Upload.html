@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+  <meta charset="utf-8">
+  <base target="_top">
+</head>
+<body data-page="upload" data-url="<?= ScriptApp.getService().getUrl() ?>">
+  <?!= include('Styles'); ?>
+
+  <div class="topbar">
+    <span class="brand">फळपिक विमा ट्रिगर विश्लेषण</span>
+    <span class="userbox" id="userbox"></span>
+  </div>
+
+  <div class="container">
+    <div class="card">
+      <h2>Excel अपलोड करून विश्लेषण</h2>
+
+      <div class="formrow">
+        <label>पीक
+          <select id="crop"></select>
+        </label>
+        <label>जिल्हा
+          <select id="district"></select>
+        </label>
+        <label>तालुका / केंद्र
+          <input id="taluka" type="text" placeholder="उदा. चिखली — चंदई">
+        </label>
+      </div>
+
+      <div class="formrow">
+        <label>कालावधी — सुरुवात
+          <input id="startDate" type="date">
+        </label>
+        <label>कालावधी — समाप्ती
+          <input id="endDate" type="date">
+        </label>
+      </div>
+
+      <div class="formrow">
+        <label>हवामान Excel/CSV फाइल (.xlsx / .csv)
+          <input id="file" type="file" accept=".xlsx,.xls,.csv">
+        </label>
+      </div>
+
+      <button id="parseBtn" class="btn">फाइल तपासा (Preview)</button>
+
+      <div class="formrow hidden" id="locationRow" style="margin-top:12px">
+        <label>हवामान केंद्र (फाइलमधून आपोआप)
+          <select id="location"></select>
+        </label>
+      </div>
+
+      <div id="preview" class="hidden">
+        <p id="pcount" class="dim"></p>
+        <div class="tablewrap">
+          <table id="ptable"></table>
+        </div>
+      </div>
+
+      <p></p>
+      <button id="analyzeBtn" class="btn primary hidden">विश्लेषण सुरू करा</button>
+      <div id="msg"></div>
+    </div>
+  </div>
+
+  <?!= include('JS'); ?>
+</body>
+</html>

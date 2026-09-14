@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+  <meta charset="utf-8">
+  <base target="_top">
+</head>
+<body data-page="report" data-rid="<?= reportId ?>">
+  <?!= include('Styles'); ?>
+
+  <div class="topbar">
+    <span class="brand">फळपिक विमा ट्रिगर विश्लेषण</span>
+    <span class="userbox" id="userbox"></span>
+  </div>
+
+  <div class="container">
+    <div class="card" id="rhead"></div>
+    <div class="chips" id="rsummary"></div>
+    <div class="card">
+      <div class="tablewrap">
+        <table id="rtable"></table>
+      </div>
+    </div>
+    <div>
+      <button onclick="window.print()" class="btn">प्रिंट / PDF डाउनलोड</button>
+    </div>
+  </div>
+
+  <?!= include('JS'); ?>
+</body>
+</html>

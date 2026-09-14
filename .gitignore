@@ -1,0 +1,15 @@
+# हवामान आधारित फळपिक विमा ट्रिगर विश्लेषण ॲप — .gitignore
+
+# clasp स्थानिक सेटिंग्ज (यात OAuth token असू शकते — repo मध्ये कधीच नको)
+.clasp.json
+.clasprc.json
+
+# ओळखपत्र / संवेदनशील फाइल्स
+*.local
+*secret*
+*credential*
+.env
+
+# OS फाइल्स
+.DS_Store
+Thumbs.db

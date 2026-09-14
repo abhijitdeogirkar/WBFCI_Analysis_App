@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+  <meta charset="utf-8">
+  <base target="_top">
+</head>
+<body data-page="index" data-url="<?= ScriptApp.getService().getUrl() ?>">
+  <?!= include('Styles'); ?>
+
+  <div class="topbar">
+    <span class="brand">फळपिक विमा ट्रिगर विश्लेषण</span>
+    <span class="userbox" id="userbox"></span>
+  </div>
+
+  <div class="container">
+    <div id="loginmsg" class="card hidden"></div>
+
+    <div id="dash" class="hidden">
+      <div class="card hero">
+        <h2>नमस्कार, <span id="username"></span></h2>
+        <p>भूमिका : <b id="userrole"></b></p>
+        <p class="dim">हवामान आधारित फळपिक विमा योजना — शासन निर्णय 12 जून 2024 नुसार ट्रिगर विश्लेषण</p>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>नवीन विश्लेषण</h3>
+          <p>स्कायमेट / हवामान केंद्राची Excel फाइल अपलोड करून ट्रिगर विश्लेषण रिपोर्ट तयार करा.</p>
+          <a class="btn" href="<?= ScriptApp.getService().getUrl() ?>?page=upload">Excel अपलोड करा →</a>
+        </div>
+        <div class="card">
+          <h3>प्रक्रिया (4 पावले)</h3>
+          <ol>
+            <li>पीक निवडा (उदा. द्राक्ष, मोसंबी, आंबा)</li>
+            <li>जिल्हा / केंद्र / कालावधी निवडा</li>
+            <li>Excel फाइल अपलोड करून विश्लेषण चालवा</li>
+            <li>रिपोर्ट पहा — लागू / न लागू ट्रिगर्स, भरपाई रक्कम</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <?!= include('JS'); ?>
+</body>
+</html>

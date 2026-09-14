@@ -1,0 +1,388 @@
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+/* ============================================================
+   JS.html — क्लायंट-साइड जावास्क्रिप्ट (सर्व पृष्ठांसाठी सामायिक)
+   Excel/CSV फाइल ब्राउझरमध्येच वाचून (SheetJS) सर्व्हरकडे पाठवतो.
+
+   स्कायमेट CSV स्वरूप समर्थित :
+   District, Tehsil, Location, Date, Max_Temp, Min_Temp,
+   Humidity_0830, Humidity_1730, Max_Wind, Cumulative_Rain
+   (Cumulative_Rain = दैनंदिन पाऊस; आद्रता = 0830 व 1730 ची सरासरी)
+   ============================================================ */
+var PAGE = document.body.dataset.page || 'index';
+var APP_URL = document.body.dataset.url || '';
+
+function el(id) { return document.getElementById(id); }
+function show(id) { if (el(id)) el(id).classList.remove('hidden'); }
+function hide(id) { if (el(id)) el(id).classList.add('hidden'); }
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '\u0026amp;')
+    .replace(/</g, '\u0026lt;')
+    .replace(/>/g, '\u0026gt;')
+    .replace(/"/g, '\u0026quot;');
+}
+function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+/* ================= 1) वापरकर्ता माहिती (सर्व पृष्ठे) ================= */
+google.script.run
+  .withSuccessHandler(function (u) {
+    if (!u || !u.loggedIn) {
+      if (el('userbox')) el('userbox').textContent = 'प्रवेश नाही';
+      if (el('loginmsg')) {
+        el('loginmsg').innerHTML = '<b>प्रवेश नाही.</b> ' +
+          esc((u && u.message) || 'Users शीटमध्ये तुमची नोंद करा.');
+        show('loginmsg');
+      }
+      return;
+    }
+    window.__user = u;
+    if (el('userbox')) el('userbox').textContent = u.name + ' | ' + u.role;
+    if (PAGE === 'index') {
+      el('username').textContent = u.name;
+      el('userrole').textContent = u.role;
+      show('dash');
+    }
+  })
+  .withFailureHandler(function () {
+    if (el('userbox')) el('userbox').textContent = '';
+  })
+  .getUserInfo();
+
+/* ================= 2) Upload पृष्ठ ================= */
+
+/* Excel/CSV कॉलम नावे — मराठी/इंग्रजी/स्कायमेट दोन्ही ओळखतो */
+var HEADER_MAP = {
+  date:         ['date', 'तारीख', 'दिनांक', 'day'],
+  rainfall_mm:  ['rainfall_mm', 'rainfall (mm)', 'rainfall', 'rain (mm)', 'rain',
+                 'पाऊस', 'पाऊस (मिमी)', 'पाऊस (mm)', 'पर्जन्य',
+                 'cumulative_rain', 'cumulative rain', 'daily rain'],
+  max_temp:     ['max_temp', 'max temp', 'maxtemp', 'maximum temperature',
+                 'कमाल तापमान', 'जास्तीत जास्त तापमान'],
+  min_temp:     ['min_temp', 'min temp', 'mintemp', 'minimum temperature',
+                 'कमीत कमी तापमान'],
+  humidity_pct: ['humidity_pct', 'humidity (%)', 'humidity',
+                 'आद्रता', 'आर्द्रता', 'आद्रता (%)'],
+  humidity_0830: ['humidity_0830', 'humidity 0830', 'rh_0830', 'आद्रता 0830'],
+  humidity_1730: ['humidity_1730', 'humidity 1730', 'rh_1730', 'आद्रता 1730'],
+  wind_speed:   ['wind_speed', 'wind speed', 'wind', 'max_wind', 'max wind',
+                 'वाऱ्याचा वेग', 'वारा', 'वाऱ्याचा वेग (किमी/तास)'],
+  tehsil:       ['tehsil', 'taluka', 'तालुका', 'तहसील'],
+  location:     ['location', 'centre', 'center', 'केंद्र', 'हवामान केंद्र', 'स्थान', 'गाव']
+};
+var CANON_MAP = {};
+Object.keys(HEADER_MAP).forEach(function (canon) {
+  HEADER_MAP[canon].forEach(function (h) {
+    CANON_MAP[String(h).trim().toLowerCase()] = canon;
+  });
+});
+
+var parsedRows = null;   /* सर्व ओळी (सर्व केंद्रे) */
+var locGroups = [];      /* केंद्रे (Tehsil + Location) */
+
+if (PAGE === 'upload') {
+
+  /* पिके व त्यांचे जिल्हे भरा */
+  google.script.run.withSuccessHandler(function (crops) {
+    var s = el('crop');
+    crops.forEach(function (c) {
+      var o = document.createElement('option');
+      o.value = c.cropId;
+      o.textContent = c.cropName + (c.season ? ' (' + c.season + ')' : '');
+      s.appendChild(o);
+    });
+    s.onchange = function () {
+      var sel = null;
+      crops.forEach(function (c) { if (c.cropId === s.value) sel = c; });
+      var d = el('district');
+      d.innerHTML = '';
+      if (sel && sel.districts.length) {
+        sel.districts.forEach(function (name) {
+          var o = document.createElement('option');
+          o.value = name; o.textContent = name;
+          d.appendChild(o);
+        });
+      } else {
+        var o = document.createElement('option');
+        o.value = ''; o.textContent = '— जिल्हे नोंदवलेले नाहीत —';
+        d.appendChild(o);
+      }
+    };
+    s.onchange();
+  }).getCropsList();
+
+  /* फाइल वाचून preview दाखवा */
+  el('parseBtn').onclick = function () {
+    var f = el('file').files[0];
+    if (!f) { el('msg').innerHTML = '<span class="err">आधी Excel/CSV फाइल निवडा.</span>'; return; }
+
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array', cellDates: true });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var json = XLSX.utils.sheet_to_json(ws, { defval: null });
+
+        parsedRows = normalizeRows(json);
+
+        if (!parsedRows.length) {
+          el('msg').innerHTML = '<span class="err">फाइलमध्ये तारीख कॉलम (Date / तारीख / दिनांक) सापडला नाही. फाइलचे स्वरूप तपासा.</span>';
+          hide('analyzeBtn'); hide('preview'); hide('locationRow');
+          return;
+        }
+
+        /* केंद्रे (Tehsil + Location) शोधा */
+        locGroups = getLocationGroups(parsedRows);
+        if (locGroups.length > 1) {
+          populateLocations();
+          show('locationRow');
+        } else {
+          hide('locationRow');
+        }
+
+        /* कालावधी आपोआप भरा */
+        el('startDate').value = parsedRows[0].date;
+        el('endDate').value = parsedRows[parsedRows.length - 1].date;
+
+        refreshPreview();
+        show('analyzeBtn');
+        el('msg').innerHTML = '<span class="ok">फाइल वाचली गेली — खाली preview तपासा.</span>';
+      } catch (err) {
+        el('msg').innerHTML = '<span class="err">फाइल वाचता आली नाही : ' + esc(err.message || err) + '</span>';
+      }
+    };
+    reader.readAsArrayBuffer(f);
+  };
+
+  /* केंद्र बदलल्यावर preview + तालुका अपडेट */
+  el('location').onchange = function () {
+    if (el('location').value) {
+      var g = locGroups.filter(function (x) { return x.key === el('location').value; })[0];
+      if (g && el('taluka')) {
+        el('taluka').value = (g.tehsil ? g.tehsil + ' \u2014 ' : '') + g.location;
+      }
+    }
+    refreshPreview();
+  };
+
+  /* विश्लेषण सर्व्हरवर पाठवा */
+  el('analyzeBtn').onclick = function () {
+    var rows = selectedRows();
+    if (!rows.length) {
+      el('msg').innerHTML = '<span class="err">फाइल आधी तपासा (Preview बटण दाबा).</span>';
+      return;
+    }
+    if (!el('startDate').value || !el('endDate').value) {
+      el('msg').innerHTML = '<span class="err">कालावधी (सुरुवात व समाप्ती) निवडा.</span>';
+      return;
+    }
+    var sel = el('crop');
+    var btn = el('analyzeBtn');
+    btn.disabled = true;
+    btn.textContent = 'विश्लेषण सुरू आहे...';
+
+    var payload = {
+      cropId: sel.value,
+      cropName: sel.options[sel.selectedIndex].textContent,
+      startDate: el('startDate').value,
+      endDate: el('endDate').value,
+      district: el('district').value,
+      taluka: el('taluka').value,
+      source: 'Skymet',
+      fileName: el('file').files[0] ? el('file').files[0].name : '',
+      rows: rows
+    };
+
+    google.script.run
+      .withSuccessHandler(function (r) {
+        btn.disabled = false; btn.textContent = 'विश्लेषण सुरू करा';
+        el('msg').innerHTML = '<span class="ok">विश्लेषण पूर्ण!</span>' +
+          '<a class="btn" href="' + APP_URL + '?page=report&id=' + encodeURIComponent(r.reportId) + '">रिपोर्ट पहा →</a>';
+      })
+      .withFailureHandler(function (e) {
+        btn.disabled = false; btn.textContent = 'विश्लेषण सुरू करा';
+        el('msg').innerHTML = '<span class="err">त्रुटी : ' + esc(e.message || e) + '</span>';
+      })
+      .analyzeWeatherData(payload);
+  };
+}
+
+/* ---- निवडलेल्या केंद्राच्याच ओळी (सर्व केंद्रे असतील तर सर्व) ---- */
+function selectedRows() {
+  if (!parsedRows) return [];
+  var key = el('location') ? el('location').value : '';
+  if (!key) return parsedRows;
+  return parsedRows.filter(function (r) { return r.locKey === key; });
+}
+
+/* ---- केंद्रे (Tehsil + Location) ची यादी ---- */
+function getLocationGroups(rows) {
+  var map = {}, list = [];
+  rows.forEach(function (r) {
+    if (!r.locKey) return;
+    if (!map[r.locKey]) {
+      map[r.locKey] = { key: r.locKey, tehsil: r.tehsil, location: r.location, count: 0 };
+      list.push(map[r.locKey]);
+    }
+    map[r.locKey].count++;
+  });
+  /* सर्वाधिक दिवसांचे केंद्र पहिले */
+  list.sort(function (a, b) { return b.count - a.count; });
+  return list;
+}
+
+function populateLocations() {
+  var s = el('location');
+  s.innerHTML = '';
+  locGroups.forEach(function (g) {
+    var o = document.createElement('option');
+    o.value = g.key;
+    o.textContent = (g.tehsil ? g.tehsil + ' \u2014 ' : '') +
+      g.location + ' (' + g.count + ' दिवस)';
+    s.appendChild(o);
+  });
+  s.onchange();
+}
+
+/* ---- Excel ओळी standard स्वरूपात रूपांतरित करा ---- */
+function detectColumns(json) {
+  var found = [];
+  if (json.length) {
+    Object.keys(json[0]).forEach(function (k) {
+      var canon = CANON_MAP[String(k).trim().toLowerCase()];
+      if (canon && found.indexOf(canon) === -1) found.push(canon);
+    });
+  }
+  return found;
+}
+
+function normalizeRows(json) {
+  var out = [];
+  json.forEach(function (o) {
+    var row = {};
+    Object.keys(o).forEach(function (k) {
+      var canon = CANON_MAP[String(k).trim().toLowerCase()];
+      if (canon) row[canon] = o[k];
+    });
+    if (row.date !== undefined && row.date !== null && String(row.date).trim() !== '') {
+
+      /* आद्रता : 0830 व 1730 असतील तर सरासरी, नाहीतर एकच किंमत */
+      var h = null;
+      var h1 = num(row['humidity_0830']);
+      var h2 = num(row['humidity_1730']);
+      if (h1 !== null && h2 !== null) h = (h1 + h2) / 2;
+      else if (h1 !== null) h = h1;
+      else if (h2 !== null) h = h2;
+      else h = num(row['humidity_pct']);
+
+      var tehsil = row['tehsil'] !== undefined && row['tehsil'] !== null ? String(row['tehsil']).trim() : '';
+      var location = row['location'] !== undefined && row['location'] !== null ? String(row['location']).trim() : '';
+
+      out.push({
+        date: fmtDateStr(row.date),
+        rainfall_mm: num(row['rainfall_mm']),
+        max_temp: num(row['max_temp']),
+        min_temp: num(row['min_temp']),
+        humidity_pct: h,
+        wind_speed: num(row['wind_speed']),
+        tehsil: tehsil,
+        location: location,
+        locKey: (tehsil || location) ? (tehsil + '|' + location) : ''
+      });
+    }
+  });
+  return out;
+}
+
+function num(v) {
+  if (v === null || v === undefined || v === '') return null;
+  var n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+function fmtDateStr(v) {
+  if (v instanceof Date) return v.getFullYear() + '-' + pad(v.getMonth() + 1) + '-' + pad(v.getDate());
+  var s = String(v).trim();
+  var m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+  if (m) return m[1] + '-' + pad(+m[2]) + '-' + pad(+m[3]);
+  m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/);
+  if (m) return m[3] + '-' + pad(+m[2]) + '-' + pad(+m[1]);
+  return s;
+}
+
+/* ---- निवडलेल्या केंद्राचा preview ---- */
+function refreshPreview() {
+  var rows = selectedRows();
+  var cols = ['date', 'rainfall_mm', 'max_temp', 'min_temp', 'humidity_pct', 'wind_speed'];
+  var labels = {
+    date: 'तारीख', rainfall_mm: 'पाऊस (मिमी)', max_temp: 'कमाल ताप',
+    min_temp: 'कमी ताप', humidity_pct: 'आद्रता (%)', wind_speed: 'वारा'
+  };
+
+  show('preview');
+  el('pcount').innerHTML = 'प्रदर्शित ओळी : <b>' + rows.length + '</b>' +
+    (locGroups.length > 1 ? ' (एकूण ' + parsedRows.length + ' ओळींपैकी निवडलेले केंद्र)' : '');
+
+  var html = '<thead><tr>' + cols.map(function (c) { return '<th>' + labels[c] + '</th>'; }).join('') + '</tr></thead><tbody>';
+  rows.slice(0, 10).forEach(function (r) {
+    html += '<tr>' + cols.map(function (c) {
+      var v = r[c];
+      return '<td>' + esc(v === null || v === undefined ? '' : v) + '</td>';
+    }).join('') + '</tr>';
+  });
+  if (rows.length > 10) html += '<tr><td colspan="6" class="dim">... वगळता ' + (rows.length - 10) + ' ओळी</td></tr>';
+  html += '</tbody>';
+  el('ptable').innerHTML = html;
+}
+
+/* ================= 3) Report पृष्ठ ================= */
+if (PAGE === 'report') {
+  var rid = document.body.dataset.rid || '';
+  if (!rid) {
+    el('rhead').innerHTML = '<span class="err">रिपोर्ट क्रमांक URL मध्ये नाही.</span>';
+  } else {
+    google.script.run
+      .withSuccessHandler(renderReport)
+      .withFailureHandler(function (e) {
+        el('rhead').innerHTML = '<span class="err">त्रुटी : ' + esc(e.message || e) + '</span>';
+      })
+      .getReportById(rid);
+  }
+}
+
+function renderReport(r) {
+  var trig = 0;
+  r.results.forEach(function (x) { if (x.triggered) trig++; });
+
+  el('rhead').innerHTML =
+    '<h2>' + esc(r.cropName || r.cropId) + '</h2>' +
+    '<p>जिल्हा : <b>' + esc(r.district) + '</b> &nbsp;|&nbsp; तालुका / केंद्र : <b>' + esc(r.taluka || '—') +
+    '</b> &nbsp;|&nbsp; कालावधी : <b>' + esc(r.startDate) + '</b> ते <b>' + esc(r.endDate) + '</b></p>' +
+    '<p class="dim">रिपोर्ट क्र. : ' + esc(r.reportId) + ' &nbsp;|&nbsp; तयार कर्ता : ' + esc(r.generatedBy) + '</p>';
+
+  el('rsummary').innerHTML =
+    chip('एकूण ट्रिगर', r.results.length, 'c-blue') +
+    chip('लागू झालेले', trig, 'c-green') +
+    chip('लागू न झालेले', r.results.length - trig, 'c-amber') +
+    chip('एकूण देय भरपाई', '\u20B9 ' + Number(r.totalPayout || 0).toLocaleString('en-IN'), 'c-rose');
+
+  var html = '<thead><tr><th>अ.क्र.</th><th>ट्रिगर</th><th>वास्तविक स्थिती</th><th>निकाल</th><th>भरपाई (\u20B9)</th><th>विश्लेषण</th></tr></thead><tbody>';
+  r.results.forEach(function (x, i) {
+    html += '<tr>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td>' + esc(x.riskName) + '</td>' +
+      '<td>' + esc(x.actualText) + '</td>' +
+      '<td><span class="badge ' + (x.triggered ? 'b-green' : 'b-amber') + '">' +
+        (x.triggered ? 'लागू' : 'न लागू') + '</span></td>' +
+      '<td class="num">' + (Number(x.payout) || 0).toLocaleString('en-IN') + '</td>' +
+      '<td>' + esc(x.analysis) + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody>';
+  el('rtable').innerHTML = html;
+}
+
+function chip(label, value, cls) {
+  return '<div class="chip ' + cls + '"><b>' + esc(value) + '</b><span>' + esc(label) + '</span></div>';
+}
+</script>
